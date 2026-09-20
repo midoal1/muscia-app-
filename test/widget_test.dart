@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:muscia/models/song_model.dart';
 import 'package:muscia/services/music_repository.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
-import 'package:just_audio/just_audio.dart';
+import 'package:http/http.dart' as http;
 
 void main() {
   test('Song model serialization and properties test', () {
@@ -36,15 +36,21 @@ void main() {
       final manifest = await yt.videos.streamsClient.getManifest(v.id);
       final audioStream = manifest.audioOnly.withHighestBitrate();
       expect(audioStream.url.toString().isNotEmpty, isTrue);
-      
-      final source = AudioSource.uri(
-        audioStream.url,
-        headers: const {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Referer': 'https://www.youtube.com/',
-        },
-      );
-      expect(source, isNotNull);
+
+      final client = http.Client();
+      try {
+        final headRes = await client.head(audioStream.url);
+        expect(headRes.statusCode, isNotNull);
+        
+        final getRes = await client.get(
+          audioStream.url,
+          headers: {'Range': 'bytes=0-1024'},
+        );
+        expect(getRes.statusCode, 206);
+        expect(getRes.bodyBytes.length, greaterThan(0));
+      } finally {
+        client.close();
+      }
     } catch (_) {
     } finally {
       yt.close();

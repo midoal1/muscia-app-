@@ -10,7 +10,9 @@ enum PlayerStatus { idle, loading, playing, paused, error }
 enum MusciaRepeatMode { off, all, one }
 
 class AudioPlayerService {
-  final AudioPlayer _player = AudioPlayer();
+  final AudioPlayer _player = AudioPlayer(
+    userAgent: 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36',
+  );
   final MusicRepository _musicRepo;
   final StorageService _storageService;
 

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:youtube_explode_dart/youtube_explode_dart.dart' hide Playlist;
 import '../models/song_model.dart';
@@ -87,51 +88,67 @@ class MusicRepository {
   Future<List<String>> getStreamCandidates(Song song) async {
     // 1. Return cached full stream URL immediately
     if (_streamCache.containsKey(song.id)) {
-      return [_streamCache[song.id]!];
+      final cached = _streamCache[song.id]!;
+      return [
+        cached,
+        'https://muscia-backend.onrender.com/api/proxy?url=${Uri.encodeComponent(cached)}'
+      ];
     }
+
+    final List<String> candidates = [];
 
     // 2. Direct YouTube manifest if it is a valid 11-character YouTube video ID
     if (!song.id.startsWith('itunes_') && !song.id.startsWith('starter_') && song.id.length == 11) {
       try {
-        final manifest = await _yt.videos.streamsClient.getManifest(song.id).timeout(const Duration(seconds: 4));
+        final manifest = await _yt.videos.streamsClient.getManifest(song.id).timeout(const Duration(seconds: 12));
         final streams = _extractAllAudioStreams(manifest);
         if (streams.isNotEmpty) {
           _streamCache[song.id] = streams.first;
-          return streams;
+          candidates.addAll(streams);
+          // Add Render audio proxy as bulletproof fail-safe
+          candidates.add('https://muscia-backend.onrender.com/api/proxy?url=${Uri.encodeComponent(streams.first)}');
+          return candidates;
         }
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Direct manifest fetch failed for ${song.id}: $e');
+      }
     }
 
     // 3. Fallback search on YouTube using Title + Artist for complete full-length song
     try {
       final cleanTitle = _cleanTitle(song.title);
       final query = '$cleanTitle ${song.artist} audio';
-      final searchResults = await _yt.search.search(query).timeout(const Duration(seconds: 5));
+      final searchResults = await _yt.search.search(query).timeout(const Duration(seconds: 10));
       for (final video in searchResults.take(3)) {
         final duration = video.duration ?? Duration.zero;
         if (duration.inMinutes > 20) continue;
         try {
-          final manifest = await _yt.videos.streamsClient.getManifest(video.id).timeout(const Duration(seconds: 4));
+          final manifest = await _yt.videos.streamsClient.getManifest(video.id).timeout(const Duration(seconds: 10));
           final streams = _extractAllAudioStreams(manifest);
           if (streams.isNotEmpty) {
             _streamCache[song.id] = streams.first;
-            return streams;
+            candidates.addAll(streams);
+            candidates.add('https://muscia-backend.onrender.com/api/proxy?url=${Uri.encodeComponent(streams.first)}');
+            return candidates;
           }
         } catch (_) {
           continue;
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Search manifest fetch failed for ${song.title}: $e');
+    }
 
     // 4. Pre-existing audio URL only if NOT an Apple 30-second preview
     if (song.audioUrl != null &&
         song.audioUrl!.isNotEmpty &&
         !song.audioUrl!.toLowerCase().contains('preview') &&
         !song.audioUrl!.toLowerCase().contains('audiopreview')) {
-      return [song.audioUrl!];
+      candidates.add(song.audioUrl!);
+      candidates.add('https://muscia-backend.onrender.com/api/proxy?url=${Uri.encodeComponent(song.audioUrl!)}');
     }
 
-    return [];
+    return candidates;
   }
 
   // Fetch real-time synchronized lyrics via Render backend

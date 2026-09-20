@@ -84,6 +84,49 @@ app.get('/api/stream', async (req, res) => {
   }
 });
 
+// Full Audio Streaming Proxy (Bypasses mobile ISP blocks and ExoPlayer 403)
+app.get('/api/proxy', async (req, res) => {
+  const { url } = req.query;
+  if (!url) {
+    return res.status(400).send('URL is required');
+  }
+
+  try {
+    const targetUrl = decodeURIComponent(url);
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      'Accept': '*/*',
+      'Accept-Encoding': 'identity',
+    };
+
+    if (req.headers.range) {
+      headers['Range'] = req.headers.range;
+    }
+
+    const response = await axios({
+      method: 'GET',
+      url: targetUrl,
+      headers: headers,
+      responseType: 'stream',
+      validateStatus: (status) => status >= 200 && status < 400,
+      timeout: 15000,
+    });
+
+    res.status(response.status);
+    if (response.headers['content-type']) res.setHeader('Content-Type', response.headers['content-type']);
+    if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length']);
+    if (response.headers['content-range']) res.setHeader('Content-Range', response.headers['content-range']);
+    if (response.headers['accept-ranges']) res.setHeader('Accept-Ranges', response.headers['accept-ranges']);
+
+    response.data.pipe(res);
+  } catch (err) {
+    console.error('Proxy stream error:', err.message);
+    if (!res.headersSent) {
+      res.status(502).send('Proxy streaming failed: ' + err.message);
+    }
+  }
+});
+
 // Synchronized Lyrics Resolver (LrcLib API)
 app.get('/api/lyrics', async (req, res) => {
   const { title, artist } = req.query;
