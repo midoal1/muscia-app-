@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: muscia-backend
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node index.js
+    rootDir: server
+    healthCheckPath: /health
+    autoDeploy: true

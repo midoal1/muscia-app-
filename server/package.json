@@ -1,0 +1,17 @@
+{
+  "name": "muscia-backend",
+  "version": "1.0.0",
+  "description": "High-performance Music Streaming & Audio Resolver Service for Muscia App",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
