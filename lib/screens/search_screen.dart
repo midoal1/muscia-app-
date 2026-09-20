@@ -81,7 +81,7 @@ class _SearchScreenState extends State<SearchScreen> {
       context.read<MusicProvider>().clearSearch();
       return;
     }
-    _debounceTimer = Timer(const Duration(milliseconds: 250), () {
+    _debounceTimer = Timer(const Duration(milliseconds: 350), () {
       context.read<MusicProvider>().search(clean);
     });
   }

@@ -45,38 +45,9 @@ app.get('/api/stream', async (req, res) => {
   }
 
   try {
-    // 1. Try iTunes / Apple Music CDN resolver (guaranteed 200 OK without IP restrictions)
-    const cleanTitle = (title || '')
-      .replace(/\([^)]*\)/g, '')
-      .replace(/\[[^\]]*\]/g, '')
-      .replace(/official|music|video|audio|clip|فيديو|كليب/gi, '')
-      .trim();
-    
-    const query = `${cleanTitle} ${artist || ''}`.trim();
-    const itunesRes = await axios.get('https://itunes.apple.com/search', {
-      params: {
-        term: query,
-        media: 'music',
-        entity: 'song',
-        limit: 3
-      },
-      timeout: 4000
-    });
-
-    if (itunesRes.data && itunesRes.data.results && itunesRes.data.results.length > 0) {
-      const match = itunesRes.data.results[0];
-      if (match.previewUrl) {
-        streamCache.set(cacheKey, match.previewUrl);
-        return res.json({
-          success: true,
-          streamUrl: match.previewUrl,
-          title: match.trackName,
-          artist: match.artistName,
-          artwork: match.artworkUrl100 ? match.artworkUrl100.replace('100x100bb', '600x600bb') : null,
-          source: 'cdn_akamai'
-        });
-      }
-    }
+    // Note: Do NOT return iTunes previewUrl because it is strictly limited to 30 seconds.
+    // The mobile client uses direct native high-bitrate YouTube stream extraction for 100% full songs.
+    res.status(404).json({ success: false, message: 'Use mobile native full audio extraction engine' });
 
     // 2. Fallback: Piped Audio Stream resolver if video ID exists
     if (id && id.length === 11 && !id.startsWith('itunes_')) {

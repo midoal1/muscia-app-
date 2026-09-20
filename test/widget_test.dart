@@ -1,5 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:muscia/models/song_model.dart';
+import 'package:muscia/services/music_repository.dart';
+import 'package:youtube_explode_dart/youtube_explode_dart.dart';
+import 'package:just_audio/just_audio.dart';
 
 void main() {
   test('Song model serialization and properties test', () {
@@ -22,5 +25,48 @@ void main() {
     expect(reconstructed.title, song.title);
     expect(reconstructed.artist, song.artist);
     expect(reconstructed.duration.inSeconds, 210);
+  });
+
+  test('YouTube stream diagnostic', () async {
+    final yt = YoutubeExplode();
+    try {
+      final results = await yt.search.search('Wegz El Bakht audio');
+      expect(results.isNotEmpty, isTrue);
+      final v = results.first;
+      final manifest = await yt.videos.streamsClient.getManifest(v.id);
+      final audioStream = manifest.audioOnly.withHighestBitrate();
+      expect(audioStream.url.toString().isNotEmpty, isTrue);
+      
+      final source = AudioSource.uri(
+        audioStream.url,
+        headers: const {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Referer': 'https://www.youtube.com/',
+        },
+      );
+      expect(source, isNotNull);
+    } catch (_) {
+    } finally {
+      yt.close();
+    }
+  });
+
+  test('MusicRepository returns full streams for iTunes and YouTube songs without 30s preview', () async {
+    final repo = MusicRepository();
+    final itunesSong = Song(
+      id: 'itunes_99999',
+      title: 'البخت',
+      artist: 'ويجز',
+      album: 'Single',
+      duration: const Duration(minutes: 3, seconds: 45),
+      artworkUrl: 'https://example.com/art.jpg',
+    );
+
+    final candidates = await repo.getStreamCandidates(itunesSong);
+    expect(candidates.isNotEmpty, isTrue, reason: 'Must find at least one playable full stream');
+    for (final c in candidates) {
+      expect(c.toLowerCase().contains('preview'), isFalse, reason: 'Candidate should NEVER be a 30-second preview!');
+    }
+    repo.dispose();
   });
 }

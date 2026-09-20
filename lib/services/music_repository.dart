@@ -61,7 +61,6 @@ class MusicRepository {
           final artwork = (item['artworkUrl100'] as String? ?? '')
               .replaceAll('100x100bb', '600x600bb');
           final durationMs = item['trackTimeMillis'] as int? ?? 180000;
-          final previewUrl = item['previewUrl'] as String?;
 
           return Song(
             id: 'itunes_${item['trackId']}',
@@ -70,7 +69,7 @@ class MusicRepository {
             album: item['collectionName'] as String? ?? 'Album',
             duration: Duration(milliseconds: durationMs),
             artworkUrl: artwork,
-            audioUrl: previewUrl,
+            audioUrl: null, // Always resolve full YouTube audio track on play
           );
         }).toList();
       }
@@ -84,91 +83,55 @@ class MusicRepository {
     return candidates.isNotEmpty ? candidates.first : null;
   }
 
-  // Get a list of candidate playable stream URLs (YouTube, Apple CDN fallback)
+  // Get a list of candidate playable FULL stream URLs (Never previews)
   Future<List<String>> getStreamCandidates(Song song) async {
-    final List<String> candidates = [];
-
-    // Pre-existing audio URL
-    if (song.audioUrl != null && song.audioUrl!.isNotEmpty) {
-      candidates.add(song.audioUrl!);
-    }
-
-    // Cached stream URL
+    // 1. Return cached full stream URL immediately
     if (_streamCache.containsKey(song.id)) {
-      candidates.add(_streamCache[song.id]!);
+      return [_streamCache[song.id]!];
     }
 
-    // 0. Try Render dedicated backend proxy if live
-    try {
-      final renderStream = await _fetchRenderBackendStream(song.title, song.artist, song.id);
-      if (renderStream != null && !candidates.contains(renderStream)) {
-        candidates.add(renderStream);
-        _streamCache[song.id] = renderStream;
-      }
-    } catch (_) {}
-
-    // 1. Direct YouTube manifest if it is a valid 11-character YouTube video ID
+    // 2. Direct YouTube manifest if it is a valid 11-character YouTube video ID
     if (!song.id.startsWith('itunes_') && !song.id.startsWith('starter_') && song.id.length == 11) {
       try {
         final manifest = await _yt.videos.streamsClient.getManifest(song.id).timeout(const Duration(seconds: 4));
-        final url = _extractBestAudioStream(manifest);
-        if (url != null && !candidates.contains(url)) {
-          candidates.insert(0, url);
-          _streamCache[song.id] = url;
+        final streams = _extractAllAudioStreams(manifest);
+        if (streams.isNotEmpty) {
+          _streamCache[song.id] = streams.first;
+          return streams;
         }
       } catch (_) {}
     }
 
-    // 2. High-speed Apple Music / iTunes CDN stream (100% reliable 200 OK on all networks)
+    // 3. Fallback search on YouTube using Title + Artist for complete full-length song
     try {
-      final appleStream = await _fetchAppleStream(song.title, song.artist);
-      if (appleStream != null && !candidates.contains(appleStream)) {
-        candidates.add(appleStream);
-      }
-    } catch (_) {}
-
-    // 3. Fallback search on YouTube using Title + Artist
-    if (candidates.isEmpty) {
-      try {
-        final query = '${song.title} ${song.artist} audio';
-        final searchResults = await _yt.search.search(query).timeout(const Duration(seconds: 4));
-        if (searchResults.isNotEmpty) {
-          for (final video in searchResults.take(2)) {
-            try {
-              final manifest = await _yt.videos.streamsClient.getManifest(video.id).timeout(const Duration(seconds: 4));
-              final url = _extractBestAudioStream(manifest);
-              if (url != null && !candidates.contains(url)) {
-                candidates.add(url);
-                _streamCache[song.id] = url;
-                break;
-              }
-            } catch (_) {
-              continue;
-            }
+      final cleanTitle = _cleanTitle(song.title);
+      final query = '$cleanTitle ${song.artist} audio';
+      final searchResults = await _yt.search.search(query).timeout(const Duration(seconds: 5));
+      for (final video in searchResults.take(3)) {
+        final duration = video.duration ?? Duration.zero;
+        if (duration.inMinutes > 20) continue;
+        try {
+          final manifest = await _yt.videos.streamsClient.getManifest(video.id).timeout(const Duration(seconds: 4));
+          final streams = _extractAllAudioStreams(manifest);
+          if (streams.isNotEmpty) {
+            _streamCache[song.id] = streams.first;
+            return streams;
           }
-        }
-      } catch (_) {}
-    }
-
-    return candidates;
-  }
-
-  // Optional Render Backend proxy resolver (when deployed on Render)
-  Future<String?> _fetchRenderBackendStream(String title, String artist, String id) async {
-    try {
-      final cleanTitle = _cleanTitle(title);
-      final url = Uri.parse(
-        'https://muscia-backend.onrender.com/api/stream?title=${Uri.encodeComponent(cleanTitle)}&artist=${Uri.encodeComponent(artist)}&id=${Uri.encodeComponent(id)}',
-      );
-      final res = await http.get(url).timeout(const Duration(milliseconds: 2500));
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body) as Map<String, dynamic>;
-        if (data['success'] == true && data['streamUrl'] != null) {
-          return data['streamUrl'] as String;
+        } catch (_) {
+          continue;
         }
       }
     } catch (_) {}
-    return null;
+
+    // 4. Pre-existing audio URL only if NOT an Apple 30-second preview
+    if (song.audioUrl != null &&
+        song.audioUrl!.isNotEmpty &&
+        !song.audioUrl!.toLowerCase().contains('preview') &&
+        !song.audioUrl!.toLowerCase().contains('audiopreview')) {
+      return [song.audioUrl!];
+    }
+
+    return [];
   }
 
   // Fetch real-time synchronized lyrics via Render backend
@@ -191,100 +154,37 @@ class MusicRepository {
     return null;
   }
 
-  // Fast Apple CDN stream fetcher using multi-variant query resolution
-  Future<String?> _fetchAppleStream(String title, String artist) async {
-    final queries = _generateSearchQueries(title, artist);
-    for (final q in queries.take(3)) {
-      try {
-        final url = Uri.parse(
-          'https://itunes.apple.com/search?term=${Uri.encodeComponent(q)}&media=music&entity=song&limit=1',
-        );
-        final res = await http.get(url).timeout(const Duration(seconds: 3));
-        if (res.statusCode == 200) {
-          final data = jsonDecode(res.body) as Map<String, dynamic>;
-          final results = (data['results'] as List<dynamic>?) ?? [];
-          if (results.isNotEmpty) {
-            final preview = results[0]['previewUrl'] as String?;
-            if (preview != null && preview.isNotEmpty) {
-              return preview;
-            }
-          }
-        }
-      } catch (_) {
-        continue;
-      }
-    }
-    return null;
-  }
-
-  // Generate clean, high-precision search queries from noisy video titles and artist channels
-  List<String> _generateSearchQueries(String title, String artist) {
-    final List<String> queries = [];
-
-    var cleanTitle = title;
-    cleanTitle = cleanTitle.replaceAll(RegExp(r'\([^)]*\)'), ' ');
-    cleanTitle = cleanTitle.replaceAll(RegExp(r'\[[^\]]*\]'), ' ');
-    final noiseWords = [
-      'Official', 'Music', 'Video', 'Audio', 'Clip', 'Lyrics', 'Lyric',
-      'فيديو', 'كليب', 'الكليب', 'الرسمي', 'أغنية', 'اغنية',
-      'prod by', 'prod.', 'feat.', 'ft.', 'Records', 'واورنچ', 'اورنچ'
-    ];
-    for (final w in noiseWords) {
-      cleanTitle = cleanTitle.replaceAll(RegExp(w, caseSensitive: false), ' ');
-    }
-
-    final titleParts = cleanTitle
-        .split(RegExp(r'[-–—|•:]'))
-        .map((p) => p.trim())
-        .where((p) => p.isNotEmpty && p != '...')
-        .toList();
-
-    var cleanArtist = artist;
-    cleanArtist = cleanArtist.replaceAll(
-      RegExp(r'(and|Records|Music|Entertainment|Production|شخصي|قناة)', caseSensitive: false),
-      ' ',
-    );
-    final artistParts = cleanArtist
-        .split(RegExp(r'[-–—|•:]'))
-        .map((p) => p.trim())
-        .where((p) => p.isNotEmpty && p != '...')
-        .toList();
-
-    if (titleParts.length >= 2) {
-      queries.add('${titleParts[0]} ${titleParts[1]}');
-      queries.add(titleParts[1]);
-      queries.add('${titleParts[1]} ${titleParts[0]}');
-    }
-
-    final primaryArtist = artistParts.isNotEmpty ? artistParts.first : '';
-    final mainTitle = titleParts.isNotEmpty ? titleParts.last : cleanTitle;
-    if (primaryArtist.isNotEmpty && mainTitle.isNotEmpty) {
-      queries.add('$primaryArtist $mainTitle');
-    }
-
-    queries.add(cleanTitle.replaceAll('...', '').trim());
-
-    return queries.toSet().where((q) => q.trim().length > 2).toList();
-  }
-
-  // Extract the best audio stream, prioritizing Android-friendly MP4 (AAC) container
-  String? _extractBestAudioStream(StreamManifest manifest) {
+  // Extract all high-quality audio streams (prioritizing Android MP4/AAC and Opus)
+  List<String> _extractAllAudioStreams(StreamManifest manifest) {
+    final List<String> urls = [];
     try {
       final audioStreams = manifest.audioOnly.toList();
-      if (audioStreams.isEmpty) return null;
+      if (audioStreams.isEmpty) return urls;
 
-      // Prefer MP4 container (AAC audioCodec) for seamless Android MediaPlayer/ExoPlayer support
+      // 1. Android-native MP4 (AAC) - Best compatibility and instant seek
       final mp4Streams = audioStreams.where((s) => s.container.name.toLowerCase() == 'mp4').toList();
       if (mp4Streams.isNotEmpty) {
         mp4Streams.sort((a, b) => b.bitrate.compareTo(a.bitrate));
-        return mp4Streams.first.url.toString();
+        urls.add(mp4Streams.first.url.toString());
       }
 
-      // Fallback to highest bitrate stream (e.g. WebM/Opus)
-      return audioStreams.withHighestBitrate().url.toString();
-    } catch (_) {
-      return null;
-    }
+      // 2. High-fidelity WebM (Opus)
+      final webmStreams = audioStreams.where((s) => s.container.name.toLowerCase() == 'webm').toList();
+      if (webmStreams.isNotEmpty) {
+        webmStreams.sort((a, b) => b.bitrate.compareTo(a.bitrate));
+        final webmUrl = webmStreams.first.url.toString();
+        if (!urls.contains(webmUrl)) {
+          urls.add(webmUrl);
+        }
+      }
+
+      // 3. Any remaining highest bitrate stream
+      final highest = audioStreams.withHighestBitrate().url.toString();
+      if (!urls.contains(highest)) {
+        urls.add(highest);
+      }
+    } catch (_) {}
+    return urls;
   }
 
   // Get trending tracks worldwide and arabic
