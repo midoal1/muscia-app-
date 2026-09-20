@@ -3,6 +3,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
 import '../models/song_model.dart';
 import '../providers/player_provider.dart';
+import '../providers/music_provider.dart';
 import '../services/audio_player_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/waveform_visualizer.dart';
@@ -195,28 +196,61 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 30),
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: AppColors.borderHighlight),
-                    ),
-                    child: const Text(
-                      '♪ استمع واستمتع بالمشاعر العميقة ♪\n\n'
-                      'كلمات الأغاني المزامنة متوفرة تلقائياً\n'
-                      'عبر مكتبة الموسيقى الشاملة\n\n'
-                      'كل نغمة تحكي قصة،\n'
-                      'وكل كلمة تلامس الروح.\n'
-                      'عيش اللحظة مع Muscia بأعلى جودة صوتية.',
-                      style: TextStyle(
-                        fontSize: 17,
-                        height: 2.0,
-                        color: Colors.white,
-                        fontWeight: FontWeight.w500,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
+                  FutureBuilder<String?>(
+                    future: context.read<MusicProvider>().getLyrics(song.title, song.artist),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 40),
+                          child: Center(
+                            child: CircularProgressIndicator(color: AppColors.gazelleRedBright),
+                          ),
+                        );
+                      }
+                      final lyrics = snapshot.data;
+                      if (lyrics != null && lyrics.trim().isNotEmpty) {
+                        return Container(
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.05),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: AppColors.borderHighlight),
+                          ),
+                          child: Text(
+                            lyrics,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              height: 2.0,
+                              color: Colors.white,
+                              fontWeight: FontWeight.w500,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        );
+                      }
+                      return Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.05),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: AppColors.borderHighlight),
+                        ),
+                        child: const Text(
+                          '♪ استمع واستمتع بالمشاعر العميقة ♪\n\n'
+                          'لم يتم العثور على كلمات مكتوبة لهذه الأغنية حتى الآن.\n\n'
+                          'كل نغمة تحكي قصة،\n'
+                          'وكل لحن يلامس الروح.\n'
+                          'عيش اللحظة مع Muscia بأعلى جودة صوتية.',
+                          style: TextStyle(
+                            fontSize: 17,
+                            height: 2.0,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      );
+                    },
                   ),
                 ],
               ),

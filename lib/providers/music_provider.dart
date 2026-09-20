@@ -50,6 +50,8 @@ class MusicProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<String?> getLyrics(String title, String artist) => _musicRepo.getLyrics(title, artist);
+
   Future<void> _initData() async {
     _featuredPlaylists = _musicRepo.getFeaturedPlaylists();
     _topArtists = _musicRepo.getTopArtists();

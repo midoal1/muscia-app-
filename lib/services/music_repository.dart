@@ -171,6 +171,26 @@ class MusicRepository {
     return null;
   }
 
+  // Fetch real-time synchronized lyrics via Render backend
+  Future<String?> getLyrics(String title, String artist) async {
+    try {
+      final cleanTitle = _cleanTitle(title);
+      final url = Uri.parse(
+        'https://muscia-backend.onrender.com/api/lyrics?title=${Uri.encodeComponent(cleanTitle)}&artist=${Uri.encodeComponent(artist)}',
+      );
+      final res = await http.get(url).timeout(const Duration(seconds: 4));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        if (data['success'] == true && data['lyrics'] != null) {
+          final rawLyrics = data['lyrics'] as String;
+          // Clean timestamps like [00:13.13] for readable display
+          return rawLyrics.replaceAll(RegExp(r'\[\d{2}:\d{2}\.\d{2}\]'), '').trim();
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
   // Fast Apple CDN stream fetcher using multi-variant query resolution
   Future<String?> _fetchAppleStream(String title, String artist) async {
     final queries = _generateSearchQueries(title, artist);
