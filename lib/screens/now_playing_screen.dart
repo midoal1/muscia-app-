@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
@@ -379,12 +380,45 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
     final artSize = (screenHeight * 0.30).clamp(180.0, 245.0);
 
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: AppColors.emotionalPlayerGradient,
-        ),
-        child: SafeArea(
-          child: Column(
+      backgroundColor: AppColors.background,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Dynamic Atmospheric Blurred Artwork Background
+          if (song.artworkUrl.isNotEmpty)
+            Positioned.fill(
+              child: Opacity(
+                opacity: 0.35,
+                child: ImageFiltered(
+                  imageFilter: ImageFilter.blur(sigmaX: 55, sigmaY: 55),
+                  child: CachedNetworkImage(
+                    imageUrl: song.artworkUrl,
+                    fit: BoxFit.cover,
+                    errorWidget: (c, u, e) => Container(color: AppColors.gazelleRedDark),
+                  ),
+                ),
+              ),
+            ),
+
+          // Deep Dark Gradient Tint Overlay
+          Positioned.fill(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    AppColors.gazelleRedDark.withValues(alpha: 0.45),
+                    AppColors.background.withValues(alpha: 0.8),
+                    AppColors.background,
+                  ],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                ),
+              ),
+            ),
+          ),
+
+          SafeArea(
+            child: Column(
             children: [
               // Top Bar
               Padding(
@@ -791,7 +825,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
             ],
           ),
         ),
-      ),
-    );
+      ],
+    ),
+  );
   }
 }
+

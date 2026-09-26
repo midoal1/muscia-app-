@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
@@ -5,8 +6,30 @@ import '../providers/player_provider.dart';
 import '../theme/app_theme.dart';
 import '../screens/now_playing_screen.dart';
 
-class MiniPlayer extends StatelessWidget {
+class MiniPlayer extends StatefulWidget {
   const MiniPlayer({super.key});
+
+  @override
+  State<MiniPlayer> createState() => _MiniPlayerState();
+}
+
+class _MiniPlayerState extends State<MiniPlayer> with SingleTickerProviderStateMixin {
+  late AnimationController _rotationController;
+
+  @override
+  void initState() {
+    super.initState();
+    _rotationController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 14),
+    );
+  }
+
+  @override
+  void dispose() {
+    _rotationController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -17,9 +40,16 @@ class MiniPlayer extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
+    if (playerProvider.isPlaying) {
+      if (!_rotationController.isAnimating) {
+        _rotationController.repeat();
+      }
+    } else {
+      _rotationController.stop();
+    }
+
     final double progress = playerProvider.duration.inMilliseconds > 0
-        ? (playerProvider.position.inMilliseconds /
-                playerProvider.duration.inMilliseconds)
+        ? (playerProvider.position.inMilliseconds / playerProvider.duration.inMilliseconds)
             .clamp(0.0, 1.0)
         : 0.0;
 
@@ -32,8 +62,7 @@ class MiniPlayer extends StatelessWidget {
               const begin = Offset(0.0, 1.0);
               const end = Offset.zero;
               const curve = Curves.easeOutCubic;
-              final tween =
-                  Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+              final tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
               return SlideTransition(
                 position: anim.drive(tween),
                 child: child,
@@ -43,163 +72,210 @@ class MiniPlayer extends StatelessWidget {
         );
       },
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: AppColors.surfaceLight.withValues(alpha: 0.95),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: AppColors.gazelleRedBright.withValues(alpha: 0.35),
-            width: 1.2,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.gazelleRedDark.withValues(alpha: 0.3),
-              blurRadius: 16,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
+        margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                child: Row(
-                  children: [
-                    // Album art with subtle glow
-                    Hero(
-                      tag: 'album_art_${song.id}',
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: SizedBox(
-                          width: 44,
-                          height: 44,
-                          child: song.artworkUrl.isNotEmpty
-                              ? CachedNetworkImage(
-                                  imageUrl: song.artworkUrl,
-                                  fit: BoxFit.cover,
-                                  errorWidget: (c, u, e) => Container(
-                                    color: AppColors.gazelleRedDark,
-                                    child: const Icon(Icons.music_note,
-                                        color: Colors.white, size: 22),
-                                  ),
-                                )
-                              : Container(
-                                  color: AppColors.gazelleRedDark,
-                                  child: const Icon(Icons.music_note,
-                                      color: Colors.white, size: 22),
-                                ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-
-                    // Song Info
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            song.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textPrimary,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            song.artist,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: AppColors.textSecondary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    // Favorite Button
-                    IconButton(
-                      iconSize: 22,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                      icon: Icon(
-                        playerProvider.isFavorite(song.id)
-                            ? Icons.favorite
-                            : Icons.favorite_border,
-                        color: playerProvider.isFavorite(song.id)
-                            ? AppColors.gazelleRedGlow
-                            : AppColors.textTertiary,
-                      ),
-                      onPressed: () => playerProvider.toggleFavorite(song),
-                    ),
-                    const SizedBox(width: 12),
-
-                    // Play/Pause Button
-                    GestureDetector(
-                      onTap: () => playerProvider.togglePlayPause(),
+          borderRadius: BorderRadius.circular(20),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: AppColors.miniPlayerGradient,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: AppColors.borderHighlight,
+                  width: 1.2,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                  BoxShadow(
+                    color: AppColors.gazelleRedDark.withValues(alpha: 0.35),
+                    blurRadius: 12,
+                    spreadRadius: -2,
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Micro glowing progress line on top
+                  Container(
+                    height: 2.5,
+                    width: double.infinity,
+                    color: Colors.white10,
+                    child: FractionallySizedBox(
+                      alignment: Alignment.centerLeft,
+                      widthFactor: progress,
                       child: Container(
-                        width: 38,
-                        height: 38,
                         decoration: const BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: AppColors.primaryGradient,
+                          gradient: AppColors.glowingRedGradient,
                         ),
-                        child: Center(
-                          child: playerProvider.isLoading
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
+                      ),
+                    ),
+                  ),
+
+                  // Mini Player Controls Row
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Row(
+                      children: [
+                        // Rotating Vinyl Artwork with ambient halo
+                        Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            Container(
+                              width: 48,
+                              height: 48,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: playerProvider.isPlaying
+                                        ? AppColors.gazelleRedBright.withValues(alpha: 0.4)
+                                        : Colors.transparent,
+                                    blurRadius: 12,
                                   ),
-                                )
-                              : Icon(
-                                  playerProvider.isPlaying
-                                      ? Icons.pause
-                                      : Icons.play_arrow,
-                                  color: Colors.white,
-                                  size: 22,
+                                ],
+                              ),
+                            ),
+                            RotationTransition(
+                              turns: _rotationController,
+                              child: Container(
+                                width: 44,
+                                height: 44,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: AppColors.gazelleRedGlow.withValues(alpha: 0.7),
+                                    width: 1.5,
+                                  ),
                                 ),
+                                child: ClipOval(
+                                  child: song.artworkUrl.isNotEmpty
+                                      ? CachedNetworkImage(
+                                          imageUrl: song.artworkUrl,
+                                          fit: BoxFit.cover,
+                                          errorWidget: (c, u, e) => Container(
+                                            color: AppColors.gazelleRedDark,
+                                            child: const Icon(Icons.music_note, color: Colors.white, size: 20),
+                                          ),
+                                        )
+                                      : Container(
+                                          color: AppColors.gazelleRedDark,
+                                          child: const Icon(Icons.music_note, color: Colors.white, size: 20),
+                                        ),
+                                ),
+                              ),
+                            ),
+                            // Tiny vinyl center pin
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: AppColors.background,
+                                border: Border.all(color: Colors.white54, width: 1),
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
 
-                    // Skip Next Button
-                    IconButton(
-                      iconSize: 22,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                      icon: const Icon(
-                        Icons.skip_next_rounded,
-                        color: AppColors.textSecondary,
-                      ),
-                      onPressed: () => playerProvider.next(),
-                    ),
-                  ],
-                ),
-              ),
+                        const SizedBox(width: 12),
 
-              // Thin Bottom Progress Bar
-              LinearProgressIndicator(
-                value: progress,
-                minHeight: 2.5,
-                backgroundColor: Colors.white10,
-                valueColor: const AlwaysStoppedAnimation<Color>(
-                  AppColors.gazelleRedBright,
-                ),
+                        // Song Details & Animated Equalizer Indicator
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      song.title,
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  if (playerProvider.isPlaying) ...[
+                                    const SizedBox(width: 6),
+                                    const Icon(Icons.graphic_eq_rounded, color: AppColors.gazelleRedGlow, size: 16),
+                                  ],
+                                ],
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                song.artist,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: AppColors.textSecondary,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // Quick Like/Favorite Button
+                        IconButton(
+                          icon: Icon(
+                            playerProvider.isFavorite(song.id) ? Icons.favorite : Icons.favorite_border,
+                            color: playerProvider.isFavorite(song.id) ? AppColors.gazelleRedBright : Colors.white70,
+                            size: 22,
+                          ),
+                          onPressed: () => playerProvider.toggleFavorite(song),
+                        ),
+
+                        // Glowing Circular Play/Pause Action
+                        InkWell(
+                          onTap: () => playerProvider.togglePlayPause(),
+                          borderRadius: BorderRadius.circular(22),
+                          child: Container(
+                            width: 42,
+                            height: 42,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: AppColors.glowingRedGradient,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: AppColors.gazelleRedBright.withValues(alpha: 0.5),
+                                  blurRadius: 10,
+                                  spreadRadius: 1,
+                                ),
+                              ],
+                            ),
+                            child: Center(
+                              child: playerProvider.isLoading
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                    )
+                                  : Icon(
+                                      playerProvider.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                                      color: Colors.white,
+                                      size: 26,
+                                    ),
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(width: 4),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),

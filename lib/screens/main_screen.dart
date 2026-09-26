@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/player_provider.dart';
@@ -32,20 +33,34 @@ class _MainScreenState extends State<MainScreen> {
       backgroundColor: AppColors.background,
       body: Stack(
         children: [
+          // Background ambient gradient glow
+          Positioned(
+            top: -100,
+            right: -100,
+            child: Container(
+              width: 300,
+              height: 300,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.gazelleRedDark.withValues(alpha: 0.15),
+              ),
+            ),
+          ),
+
           // Screen views
           IndexedStack(
             index: _currentIndex,
             children: _screens,
           ),
 
-          // Persistent Mini Player & Bottom Navigation
+          // Floating Persistent Mini Player & Capsule Navigation Bar
           Align(
             alignment: Alignment.bottomCenter,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (hasActiveSong) const MiniPlayer(),
-                _buildBottomNavigationBar(),
+                _buildFloatingNavBar(),
               ],
             ),
           ),
@@ -54,37 +69,59 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  Widget _buildBottomNavigationBar() {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface.withValues(alpha: 0.96),
-        border: const Border(
-          top: BorderSide(color: AppColors.borderSubtle, width: 0.5),
-        ),
-      ),
-      child: SafeArea(
-        top: false,
-        child: SizedBox(
-          height: 60,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildNavItem(
-                index: 0,
-                label: 'الرئيسية',
-                icon: _currentIndex == 0 ? Icons.home_filled : Icons.home_outlined,
+  Widget _buildFloatingNavBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(32),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+          child: Container(
+            height: 64,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: AppColors.surface.withValues(alpha: 0.85),
+              borderRadius: BorderRadius.circular(32),
+              border: Border.all(
+                color: AppColors.borderHighlight,
+                width: 1.2,
               ),
-              _buildNavItem(
-                index: 1,
-                label: 'بحث',
-                icon: Icons.search_rounded,
-              ),
-              _buildNavItem(
-                index: 2,
-                label: 'مكتبتي',
-                icon: _currentIndex == 2 ? Icons.library_music : Icons.library_music_outlined,
-              ),
-            ],
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.6),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+                BoxShadow(
+                  color: AppColors.gazelleRedDark.withValues(alpha: 0.2),
+                  blurRadius: 15,
+                  spreadRadius: -2,
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildNavItem(
+                  index: 0,
+                  label: 'الرئيسية',
+                  icon: Icons.home_rounded,
+                  activeIcon: Icons.home_filled,
+                ),
+                _buildNavItem(
+                  index: 1,
+                  label: 'استكشف',
+                  icon: Icons.explore_outlined,
+                  activeIcon: Icons.explore_rounded,
+                ),
+                _buildNavItem(
+                  index: 2,
+                  label: 'مكتبتي',
+                  icon: Icons.library_music_outlined,
+                  activeIcon: Icons.library_music_rounded,
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -95,33 +132,52 @@ class _MainScreenState extends State<MainScreen> {
     required int index,
     required String label,
     required IconData icon,
+    required IconData activeIcon,
   }) {
     final isSelected = _currentIndex == index;
-    return InkWell(
+    return GestureDetector(
       onTap: () {
         setState(() {
           _currentIndex = index;
         });
       },
-      child: SizedBox(
-        width: 80,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOutCubic,
+        padding: EdgeInsets.symmetric(
+          horizontal: isSelected ? 18 : 12,
+          vertical: 8,
+        ),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? AppColors.gazelleRedBright.withValues(alpha: 0.22)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(24),
+          border: isSelected
+              ? Border.all(color: AppColors.gazelleRedGlow.withValues(alpha: 0.5), width: 1)
+              : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              icon,
-              size: 26,
+              isSelected ? activeIcon : icon,
+              size: 24,
               color: isSelected ? AppColors.gazelleRedGlow : AppColors.textTertiary,
             ),
-            const SizedBox(height: 3),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                color: isSelected ? Colors.white : AppColors.textTertiary,
+            if (isSelected) ...[
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                  letterSpacing: 0.3,
+                ),
               ),
-            ),
+            ],
           ],
         ),
       ),
