@@ -211,9 +211,6 @@ class MusicRepository {
         if (streams.isNotEmpty) {
           _streamCache[song.id] = streams.first;
           candidates.addAll(streams);
-          // Add Render audio proxy as fail-safe
-          candidates.add('https://muscia-backend.onrender.com/api/proxy?url=${Uri.encodeComponent(streams.first)}');
-          return candidates;
         }
       } catch (e) {
         debugPrint('Direct manifest fetch failed for ${song.id}: $e');
@@ -232,29 +229,28 @@ class MusicRepository {
       }
     } catch (_) {}
 
-    // 6. YouTube search for full track
-    try {
-      final cleanTitle = _cleanTitle(song.title);
-      final query = '$cleanTitle ${song.artist} audio';
-      final searchResults = await _yt.search.search(query).timeout(const Duration(seconds: 5));
-      for (final video in searchResults.take(3)) {
-        final duration = video.duration ?? Duration.zero;
-        if (duration.inMinutes > 20) continue;
-        try {
-          final manifest = await _yt.videos.streamsClient.getManifest(video.id).timeout(const Duration(seconds: 5));
-          final streams = _extractAllAudioStreams(manifest);
-          if (streams.isNotEmpty) {
-            _streamCache[song.id] = streams.first;
-            candidates.addAll(streams);
-            candidates.add('https://muscia-backend.onrender.com/api/proxy?url=${Uri.encodeComponent(streams.first)}');
-            return candidates;
+    // 6. YouTube search for full track if candidates are still empty
+    if (candidates.isEmpty) {
+      try {
+        final cleanTitle = _cleanTitle(song.title);
+        final query = '$cleanTitle ${song.artist} audio';
+        final searchResults = await _yt.search.search(query).timeout(const Duration(seconds: 5));
+        for (final video in searchResults.take(2)) {
+          try {
+            final manifest = await _yt.videos.streamsClient.getManifest(video.id).timeout(const Duration(seconds: 5));
+            final streams = _extractAllAudioStreams(manifest);
+            if (streams.isNotEmpty) {
+              _streamCache[song.id] = streams.first;
+              candidates.addAll(streams);
+              break;
+            }
+          } catch (_) {
+            continue;
           }
-        } catch (_) {
-          continue;
         }
+      } catch (e) {
+        debugPrint('Search manifest fetch failed for ${song.title}: $e');
       }
-    } catch (e) {
-      debugPrint('Search manifest fetch failed for ${song.title}: $e');
     }
 
     return candidates;
@@ -280,12 +276,11 @@ class MusicRepository {
     return null;
   }
 
-  // Extract all high-quality audio streams (prioritizing Android MP4/AAC and Opus)
+  // Extract all high-quality audio streams (prioritizing Android MP4/AAC, Muxed, and Opus)
   List<String> _extractAllAudioStreams(StreamManifest manifest) {
     final List<String> urls = [];
     try {
       final audioStreams = manifest.audioOnly.toList();
-      if (audioStreams.isEmpty) return urls;
 
       // 1. Android-native MP4 (AAC) - Best compatibility and instant seek
       final mp4Streams = audioStreams.where((s) => s.container.name.toLowerCase() == 'mp4').toList();
@@ -294,7 +289,13 @@ class MusicRepository {
         urls.add(mp4Streams.first.url.toString());
       }
 
-      // 2. High-fidelity WebM (Opus)
+      // 2. Muxed MP4 (H.264 + AAC audio 360p) - Universal and unthrottled on mobile networks
+      final muxedStreams = manifest.muxed.where((s) => s.container.name.toLowerCase() == 'mp4').toList();
+      if (muxedStreams.isNotEmpty) {
+        urls.add(muxedStreams.first.url.toString());
+      }
+
+      // 3. High-fidelity WebM (Opus)
       final webmStreams = audioStreams.where((s) => s.container.name.toLowerCase() == 'webm').toList();
       if (webmStreams.isNotEmpty) {
         webmStreams.sort((a, b) => b.bitrate.compareTo(a.bitrate));
@@ -304,10 +305,12 @@ class MusicRepository {
         }
       }
 
-      // 3. Any remaining highest bitrate stream
-      final highest = audioStreams.withHighestBitrate().url.toString();
-      if (!urls.contains(highest)) {
-        urls.add(highest);
+      // 4. Any remaining highest bitrate stream
+      if (audioStreams.isNotEmpty) {
+        final highest = audioStreams.withHighestBitrate().url.toString();
+        if (!urls.contains(highest)) {
+          urls.add(highest);
+        }
       }
     } catch (_) {}
     return urls;

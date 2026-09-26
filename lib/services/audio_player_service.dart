@@ -10,9 +10,7 @@ enum PlayerStatus { idle, loading, playing, paused, error }
 enum MusciaRepeatMode { off, all, one }
 
 class AudioPlayerService {
-  final AudioPlayer _player = AudioPlayer(
-    userAgent: 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36',
-  );
+  final AudioPlayer _player = AudioPlayer();
   final MusicRepository _musicRepo;
   final StorageService _storageService;
 
@@ -22,6 +20,9 @@ class AudioPlayerService {
 
   bool _isShuffle = false;
   MusciaRepeatMode _repeatMode = MusciaRepeatMode.off;
+
+  Timer? _sleepTimer;
+  DateTime? _sleepTimerEndTime;
 
   final _statusController = StreamController<PlayerStatus>.broadcast();
   PlayerStatus _currentStatus = PlayerStatus.idle;
@@ -113,18 +114,9 @@ class AudioPlayerService {
           // Stop previous track before loading new source
           await _player.stop();
 
-          // Prepare headers (only for Google Video CDN to avoid breaking 302 redirects on Audius)
-          Map<String, String>? headers;
-          if (streamUrl.contains('googlevideo.com')) {
-            headers = const {
-              'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36',
-              'Accept': '*/*',
-            };
-          }
-
           final audioSource = AudioSource.uri(
             Uri.parse(streamUrl),
-            headers: headers,
+            headers: null,
             tag: MediaItem(
               id: song.id,
               album: song.album,
@@ -135,25 +127,16 @@ class AudioPlayerService {
             ),
           );
 
-          // IMPORTANT: preload: false prevents ExoPlayer from blocking the Dart Future indefinitely!
-          await _player.setAudioSource(audioSource, preload: false).timeout(const Duration(seconds: 4));
+          await _player.setAudioSource(audioSource, preload: false);
           await _player.play();
 
-          // Wait up to 4.5s to confirm playback has started before advancing to fallback
-          final confirmed = await _player.playerStateStream
-              .firstWhere(
-                (state) => state.playing && state.processingState != ProcessingState.idle,
-              )
-              .timeout(const Duration(milliseconds: 4500))
-              .then((_) => true)
-              .catchError((_) => false);
-
-          if (confirmed) {
+          final started = await _waitForPlaybackStart();
+          if (started) {
             playSuccess = true;
             debugPrint('Successfully playing: ${song.title}');
             break;
           } else {
-            debugPrint('Candidate stream did not start within 4.5s, trying next candidate...');
+            debugPrint('Candidate stream failed to start, advancing to next candidate...');
           }
         } catch (candidateError) {
           debugPrint('Candidate stream failed ($candidateError), trying next candidate...');
@@ -167,6 +150,34 @@ class AudioPlayerService {
       debugPrint('Critical error playing song: $e');
       _setStatus(PlayerStatus.error);
     }
+  }
+
+  Future<bool> _waitForPlaybackStart() async {
+    final completer = Completer<bool>();
+    StreamSubscription? stateSub;
+    StreamSubscription? errorSub;
+    Timer? timeoutTimer;
+
+    void finish(bool ok) {
+      if (!completer.isCompleted) {
+        timeoutTimer?.cancel();
+        stateSub?.cancel();
+        errorSub?.cancel();
+        completer.complete(ok);
+      }
+    }
+
+    timeoutTimer = Timer(const Duration(seconds: 8), () => finish(false));
+
+    stateSub = _player.playerStateStream.listen((state) {
+      if (state.playing && (state.processingState == ProcessingState.ready || state.processingState == ProcessingState.buffering)) {
+        finish(true);
+      }
+    });
+
+    errorSub = _player.playbackEventStream.listen((_) {}, onError: (_) => finish(false));
+
+    return completer.future;
   }
 
   Future<void> togglePlayPause() async {
@@ -247,7 +258,27 @@ class AudioPlayerService {
     }
   }
 
+  DateTime? get sleepTimerEndTime => _sleepTimerEndTime;
+  bool get isSleepTimerActive => _sleepTimer != null && _sleepTimer!.isActive;
+
+  void setSleepTimer(Duration? duration) {
+    _sleepTimer?.cancel();
+    _sleepTimer = null;
+    _sleepTimerEndTime = null;
+
+    if (duration != null && duration.inSeconds > 0) {
+      _sleepTimerEndTime = DateTime.now().add(duration);
+      _sleepTimer = Timer(duration, () {
+        _player.pause();
+        _sleepTimer = null;
+        _sleepTimerEndTime = null;
+        _setStatus(PlayerStatus.paused);
+      });
+    }
+  }
+
   void dispose() {
+    _sleepTimer?.cancel();
     _statusController.close();
     _player.dispose();
   }

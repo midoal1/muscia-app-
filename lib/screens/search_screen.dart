@@ -67,6 +67,20 @@ class _SearchScreenState extends State<SearchScreen> {
     },
   ];
 
+  final List<String> _quickFilters = [
+    'عمرو دياب',
+    'ويجز (Wegz)',
+    'The Weeknd',
+    'كايروكي',
+    'شيرين عبدالوهاب',
+    'Billie Eilish',
+    'تامر حسني',
+    'محمد حماقي',
+    'طرب مصري',
+    'أغاني تريند 2025',
+  ];
+  String? _selectedFilter;
+
   @override
   void dispose() {
     _controller.dispose();
@@ -78,15 +92,17 @@ class _SearchScreenState extends State<SearchScreen> {
     _debounceTimer?.cancel();
     final clean = query.trim();
     if (clean.isEmpty) {
+      setState(() => _selectedFilter = null);
       context.read<MusicProvider>().clearSearch();
       return;
     }
-    _debounceTimer = Timer(const Duration(milliseconds: 350), () {
+    _debounceTimer = Timer(const Duration(milliseconds: 250), () {
       context.read<MusicProvider>().search(clean);
     });
   }
 
   void _searchGenre(String query, String title) {
+    setState(() => _selectedFilter = title);
     _controller.text = title;
     _debounceTimer?.cancel();
     context.read<MusicProvider>().search(query);
@@ -151,6 +167,7 @@ class _SearchScreenState extends State<SearchScreen> {
                             onPressed: () {
                               _controller.clear();
                               _debounceTimer?.cancel();
+                              setState(() => _selectedFilter = null);
                               musicProvider.clearSearch();
                             },
                           )
@@ -162,8 +179,55 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
             ),
 
+            const SizedBox(height: 10),
+
+            // Quick Filter Chips Bar
+            SizedBox(
+              height: 34,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: _quickFilters.length,
+                separatorBuilder: (context, index) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final filter = _quickFilters[index];
+                  final isSelected = _selectedFilter == filter;
+                  return InkWell(
+                    borderRadius: BorderRadius.circular(18),
+                    onTap: () {
+                      setState(() {
+                        _selectedFilter = filter;
+                        _controller.text = filter;
+                      });
+                      _debounceTimer?.cancel();
+                      context.read<MusicProvider>().search(filter);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: isSelected ? AppColors.gazelleRedBright : AppColors.surfaceLight,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(
+                          color: isSelected ? AppColors.gazelleRedGlow : Colors.white12,
+                        ),
+                      ),
+                      child: Text(
+                        filter,
+                        style: TextStyle(
+                          color: isSelected ? Colors.white : AppColors.textSecondary,
+                          fontSize: 12,
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+
             // Fast, non-blocking loading indicator
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             if (isSearching)
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 20),
@@ -179,7 +243,7 @@ class _SearchScreenState extends State<SearchScreen> {
             else
               const SizedBox(height: 2.5),
 
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
 
             // Search Content / Results
             Expanded(

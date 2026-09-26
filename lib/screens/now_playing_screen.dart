@@ -144,6 +144,95 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
     );
   }
 
+  void _showSleepTimerSheet(BuildContext context, PlayerProvider playerProvider) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        final remaining = playerProvider.duration - playerProvider.position;
+        final options = [
+          {'title': 'إيقاف بعد 15 دقيقة', 'duration': const Duration(minutes: 15)},
+          {'title': 'إيقاف بعد 30 دقيقة', 'duration': const Duration(minutes: 30)},
+          {'title': 'إيقاف بعد 45 دقيقة', 'duration': const Duration(minutes: 45)},
+          {'title': 'إيقاف بعد ساعة (60 دقيقة)', 'duration': const Duration(minutes: 60)},
+          if (remaining.inSeconds > 5)
+            {'title': 'إيقاف عند نهاية الأغنية الحالية', 'duration': remaining},
+        ];
+
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'مؤقت النوم (Sleep Timer)',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  if (playerProvider.isSleepTimerActive)
+                    TextButton(
+                      onPressed: () {
+                        playerProvider.setSleepTimer(null);
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('تم إلغاء مؤقت النوم'),
+                            backgroundColor: AppColors.surfaceLight,
+                          ),
+                        );
+                      },
+                      child: const Text('إلغاء المؤقت', style: TextStyle(color: AppColors.gazelleRedBright)),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              ...options.map((opt) {
+                final dur = opt['duration'] as Duration;
+                return ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.timer_outlined, color: AppColors.gazelleRedGlow),
+                  title: Text(opt['title'] as String, style: const TextStyle(color: Colors.white, fontSize: 15)),
+                  onTap: () {
+                    playerProvider.setSleepTimer(dur);
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('تم ضبط مؤقت النوم: ${opt['title']}'),
+                        backgroundColor: AppColors.gazelleRedDark,
+                      ),
+                    );
+                  },
+                );
+              }),
+              const SizedBox(height: 10),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   void _showLyricsSheet(BuildContext context, Song song) {
     showModalBottomSheet(
       context: context,
@@ -329,9 +418,22 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
                         ),
                       ],
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.more_vert, color: Colors.white),
-                      onPressed: () => _showQueueSheet(context, playerProvider),
+                    Row(
+                      children: [
+                        IconButton(
+                          icon: Icon(
+                            playerProvider.isSleepTimerActive ? Icons.bedtime : Icons.bedtime_outlined,
+                            color: playerProvider.isSleepTimerActive ? AppColors.gazelleRedBright : Colors.white,
+                          ),
+                          tooltip: 'مؤقت النوم',
+                          onPressed: () => _showSleepTimerSheet(context, playerProvider),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.queue_music, color: Colors.white),
+                          tooltip: 'قائمة الانتظار',
+                          onPressed: () => _showQueueSheet(context, playerProvider),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -339,76 +441,92 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
 
               const Spacer(),
 
-              // Vinyl / Artwork with pulsing Gazelle Red Glow
-              Center(
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    // Ambient red glow behind artwork
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 600),
-                      width: artSize + 10,
-                      height: artSize + 10,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: playerProvider.isPlaying
-                                ? AppColors.gazelleRedBright.withValues(alpha: 0.45)
-                                : AppColors.gazelleRedDark.withValues(alpha: 0.2),
-                            blurRadius: 50,
-                            spreadRadius: 15,
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    // Artwork Card
-                    Hero(
-                      tag: 'album_art_${song.id}',
-                      child: Container(
-                        width: artSize,
-                        height: artSize,
+              // Vinyl / Artwork with Swipe Gestures & pulsing Gazelle Red Glow
+              GestureDetector(
+                onHorizontalDragEnd: (details) {
+                  if (details.primaryVelocity != null) {
+                    if (details.primaryVelocity! < -150) {
+                      playerProvider.next();
+                    } else if (details.primaryVelocity! > 150) {
+                      playerProvider.previous();
+                    }
+                  }
+                },
+                onVerticalDragEnd: (details) {
+                  if (details.primaryVelocity != null && details.primaryVelocity! > 250) {
+                    Navigator.pop(context);
+                  }
+                },
+                child: Center(
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      // Ambient red glow behind artwork
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 600),
+                        width: artSize + 10,
+                        height: artSize + 10,
                         decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(22),
-                          border: Border.all(
-                            color: AppColors.borderHighlight,
-                            width: 1.5,
-                          ),
-                          boxShadow: const [
+                          shape: BoxShape.circle,
+                          boxShadow: [
                             BoxShadow(
-                              color: Colors.black87,
-                              blurRadius: 25,
-                              offset: Offset(0, 12),
+                              color: playerProvider.isPlaying
+                                  ? AppColors.gazelleRedBright.withValues(alpha: 0.45)
+                                  : AppColors.gazelleRedDark.withValues(alpha: 0.2),
+                              blurRadius: 50,
+                              spreadRadius: 15,
                             ),
                           ],
                         ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(22),
-                          child: CachedNetworkImage(
-                            imageUrl: song.artworkUrl,
-                            fit: BoxFit.cover,
-                            placeholder: (c, u) => Container(
-                              color: AppColors.surfaceLight,
-                              child: const Center(
-                                child: CircularProgressIndicator(
-                                  color: AppColors.gazelleRedBright,
+                      ),
+
+                      // Artwork Card
+                      Hero(
+                        tag: 'album_art_${song.id}',
+                        child: Container(
+                          width: artSize,
+                          height: artSize,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(22),
+                            border: Border.all(
+                              color: AppColors.borderHighlight,
+                              width: 1.5,
+                            ),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Colors.black87,
+                                blurRadius: 25,
+                                offset: Offset(0, 12),
+                              ),
+                            ],
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(22),
+                            child: CachedNetworkImage(
+                              imageUrl: song.artworkUrl,
+                              fit: BoxFit.cover,
+                              placeholder: (c, u) => Container(
+                                color: AppColors.surfaceLight,
+                                child: const Center(
+                                  child: CircularProgressIndicator(
+                                    color: AppColors.gazelleRedBright,
+                                  ),
                                 ),
                               ),
-                            ),
-                            errorWidget: (c, u, e) => Container(
-                              color: AppColors.gazelleRedDark,
-                              child: const Icon(
-                                Icons.music_note,
-                                size: 60,
-                                color: Colors.white,
+                              errorWidget: (c, u, e) => Container(
+                                color: AppColors.gazelleRedDark,
+                                child: const Icon(
+                                  Icons.music_note,
+                                  size: 60,
+                                  color: Colors.white,
+                                ),
                               ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
 

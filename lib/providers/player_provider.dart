@@ -92,6 +92,14 @@ class PlayerProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  DateTime? get sleepTimerEndTime => _audioService.sleepTimerEndTime;
+  bool get isSleepTimerActive => _audioService.isSleepTimerActive;
+
+  void setSleepTimer(Duration? duration) {
+    _audioService.setSleepTimer(duration);
+    notifyListeners();
+  }
+
   @override
   void dispose() {
     _statusSub?.cancel();
