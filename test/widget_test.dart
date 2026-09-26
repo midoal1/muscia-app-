@@ -75,4 +75,19 @@ void main() {
     }
     repo.dispose();
   });
+
+  test('Audius Music API search returns full unblocked songs', () async {
+    final repo = MusicRepository();
+    final results = await repo.searchAudius('Wegz');
+    expect(results.isNotEmpty, isTrue);
+    final song = results.first;
+    expect(song.id.startsWith('audius_'), isTrue);
+    expect(song.audioUrl, isNotNull);
+    expect(song.audioUrl!.contains('audius.co'), isTrue);
+
+    final candidates = await repo.getStreamCandidates(song);
+    expect(candidates.isNotEmpty, isTrue);
+    expect(candidates.first, song.audioUrl);
+    repo.dispose();
+  });
 }

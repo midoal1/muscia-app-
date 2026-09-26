@@ -31,7 +31,59 @@ app.get('/health', (req, res) => {
   res.status(200).send('OK');
 });
 
-// Stream Resolver
+// Dedicated Music Search API (Audius Music Protocol - 100% Full Unblocked Songs)
+app.get('/api/music/search', async (req, res) => {
+  const { q } = req.query;
+  if (!q || !q.trim()) {
+    return res.status(400).json({ success: false, tracks: [] });
+  }
+
+  const query = q.trim();
+  const cacheKey = `music_search_${query.toLowerCase()}`;
+  if (streamCache.has(cacheKey)) {
+    return res.json({ success: true, tracks: streamCache.get(cacheKey) });
+  }
+
+  try {
+    const aRes = await axios.get(`https://discoveryprovider.audius.co/v1/tracks/search`, {
+      params: { query: query, app_name: 'muscia' },
+      timeout: 5000
+    });
+
+    if (aRes.data && aRes.data.data) {
+      const tracks = aRes.data.data.map(track => ({
+        id: `audius_${track.id}`,
+        title: track.title,
+        artist: track.user ? track.user.name : 'Unknown Artist',
+        album: 'Audius',
+        durationMs: (track.duration || 180) * 1000,
+        artworkUrl: track.artwork ? (track.artwork['480x480'] || track.artwork['150x150'] || '') : '',
+        streamUrl: `https://discoveryprovider.audius.co/v1/tracks/${track.id}/stream?app_name=muscia`
+      }));
+
+      streamCache.set(cacheKey, tracks);
+      return res.json({ success: true, tracks });
+    }
+  } catch (err) {
+    console.error('Audius search error:', err.message);
+  }
+
+  res.json({ success: false, tracks: [] });
+});
+
+// Dedicated Music Stream API
+app.get('/api/music/stream', async (req, res) => {
+  const { id } = req.query;
+  if (!id) {
+    return res.status(400).json({ success: false, error: 'ID is required' });
+  }
+
+  const cleanId = id.replace('audius_', '');
+  const directUrl = `https://discoveryprovider.audius.co/v1/tracks/${cleanId}/stream?app_name=muscia`;
+  res.json({ success: true, streamUrl: directUrl });
+});
+
+// Legacy Stream Resolver
 app.get('/api/stream', async (req, res) => {
   const { title, artist, id } = req.query;
 
@@ -39,49 +91,15 @@ app.get('/api/stream', async (req, res) => {
     return res.status(400).json({ success: false, error: 'Title or ID is required' });
   }
 
-  const cacheKey = `${title || ''}_${artist || ''}_${id || ''}`.toLowerCase().trim();
-  if (streamCache.has(cacheKey)) {
-    return res.json({ success: true, streamUrl: streamCache.get(cacheKey), cached: true });
+  if (id && id.startsWith('audius_')) {
+    const cleanId = id.replace('audius_', '');
+    return res.json({
+      success: true,
+      streamUrl: `https://discoveryprovider.audius.co/v1/tracks/${cleanId}/stream?app_name=muscia`
+    });
   }
 
-  try {
-    // Note: Do NOT return iTunes previewUrl because it is strictly limited to 30 seconds.
-    // The mobile client uses direct native high-bitrate YouTube stream extraction for 100% full songs.
-    res.status(404).json({ success: false, message: 'Use mobile native full audio extraction engine' });
-
-    // 2. Fallback: Piped Audio Stream resolver if video ID exists
-    if (id && id.length === 11 && !id.startsWith('itunes_')) {
-      const pipedInstances = [
-        'https://pipedapi.kavin.rocks',
-        'https://api.piped.privacy.com.de',
-        'https://piped-api.lunar.icu'
-      ];
-
-      for (const instance of pipedInstances) {
-        try {
-          const pRes = await axios.get(`${instance}/streams/${id}`, { timeout: 3500 });
-          if (pRes.data && pRes.data.audioStreams && pRes.data.audioStreams.length > 0) {
-            const bestAudio = pRes.data.audioStreams.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
-            if (bestAudio && bestAudio.url) {
-              streamCache.set(cacheKey, bestAudio.url);
-              return res.json({
-                success: true,
-                streamUrl: bestAudio.url,
-                source: 'piped_proxy'
-              });
-            }
-          }
-        } catch (_) {
-          continue;
-        }
-      }
-    }
-
-    res.status(404).json({ success: false, error: 'No stream available' });
-  } catch (err) {
-    console.error('Stream error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
+  res.status(404).json({ success: false, message: 'Use dedicated /api/music/search or client resolver' });
 });
 
 // Full Audio Streaming Proxy (Bypasses mobile ISP blocks and ExoPlayer 403)

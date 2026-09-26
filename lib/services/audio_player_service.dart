@@ -113,13 +113,18 @@ class AudioPlayerService {
           // Stop previous track before loading new source
           await _player.stop();
 
-          // Prepare background MediaItem with browser headers to prevent 403 or throttling
-          final audioSource = AudioSource.uri(
-            Uri.parse(streamUrl),
-            headers: const {
+          // Prepare headers (only for Google Video CDN to avoid breaking 302 redirects on Audius)
+          Map<String, String>? headers;
+          if (streamUrl.contains('googlevideo.com')) {
+            headers = const {
               'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36',
               'Accept': '*/*',
-            },
+            };
+          }
+
+          final audioSource = AudioSource.uri(
+            Uri.parse(streamUrl),
+            headers: headers,
             tag: MediaItem(
               id: song.id,
               album: song.album,
@@ -130,11 +135,26 @@ class AudioPlayerService {
             ),
           );
 
-          await _player.setAudioSource(audioSource, preload: true);
+          // IMPORTANT: preload: false prevents ExoPlayer from blocking the Dart Future indefinitely!
+          await _player.setAudioSource(audioSource, preload: false).timeout(const Duration(seconds: 4));
           await _player.play();
-          playSuccess = true;
-          debugPrint('Successfully playing: ${song.title}');
-          break; // Audio started successfully!
+
+          // Wait up to 4.5s to confirm playback has started before advancing to fallback
+          final confirmed = await _player.playerStateStream
+              .firstWhere(
+                (state) => state.playing && state.processingState != ProcessingState.idle,
+              )
+              .timeout(const Duration(milliseconds: 4500))
+              .then((_) => true)
+              .catchError((_) => false);
+
+          if (confirmed) {
+            playSuccess = true;
+            debugPrint('Successfully playing: ${song.title}');
+            break;
+          } else {
+            debugPrint('Candidate stream did not start within 4.5s, trying next candidate...');
+          }
         } catch (candidateError) {
           debugPrint('Candidate stream failed ($candidateError), trying next candidate...');
         }

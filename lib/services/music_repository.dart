@@ -12,19 +12,106 @@ class MusicRepository {
   // Cache for resolved stream URLs to avoid re-fetching
   final Map<String, String> _streamCache = {};
 
-  // Global search for any song or artist
+  // Global search for any song or artist (Parallel Audius API + YouTube)
   Future<List<Song>> search(String query) async {
     final cleanQuery = query.trim();
     if (cleanQuery.isEmpty) return [];
 
     try {
-      final searchResults = await _yt.search.search(cleanQuery);
+      final futures = await Future.wait([
+        searchAudius(cleanQuery),
+        _searchYoutube(cleanQuery),
+      ]);
+
+      final audiusTracks = futures[0];
+      final youtubeTracks = futures[1];
+
+      final Map<String, Song> uniqueSongs = {};
+
+      // Prioritize Audius tracks (instant streaming audio URL pre-attached)
+      for (final s in audiusTracks) {
+        final key = '${s.title.toLowerCase()}_${s.artist.toLowerCase()}';
+        uniqueSongs[key] = s;
+      }
+
+      // Add YouTube tracks
+      for (final s in youtubeTracks) {
+        final key = '${s.title.toLowerCase()}_${s.artist.toLowerCase()}';
+        if (!uniqueSongs.containsKey(key)) {
+          uniqueSongs[key] = s;
+        }
+      }
+
+      if (uniqueSongs.isNotEmpty) {
+        return uniqueSongs.values.toList();
+      }
+    } catch (e) {
+      debugPrint('Search error: $e');
+    }
+
+    // Fallback search via iTunes API for instant resilience
+    return _searchItunesFallback(cleanQuery);
+  }
+
+  // Dedicated Music API (Audius Music Protocol - Unblocked, 100% full songs)
+  Future<List<Song>> searchAudius(String query) async {
+    final cleanQuery = query.trim();
+    if (cleanQuery.isEmpty) return [];
+
+    try {
+      final url = Uri.parse(
+        'https://discoveryprovider.audius.co/v1/tracks/search?query=${Uri.encodeComponent(cleanQuery)}&app_name=muscia',
+      );
+      final res = await http.get(url).timeout(const Duration(seconds: 4));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final trackList = (data['data'] as List<dynamic>?) ?? [];
+        final List<Song> songs = [];
+        for (final item in trackList) {
+          final id = item['id']?.toString() ?? '';
+          if (id.isEmpty) continue;
+          final title = item['title'] as String? ?? 'Song';
+          final user = item['user'] as Map<String, dynamic>?;
+          final artist = user != null ? (user['name'] as String? ?? 'Artist') : 'Artist';
+          final durationSec = (item['duration'] as num?)?.toInt() ?? 180;
+          if (durationSec > 1800) continue; // Skip DJ mixes over 30 mins
+          final artworkMap = item['artwork'] as Map<String, dynamic>?;
+          final artwork = artworkMap != null
+              ? (artworkMap['480x480'] ?? artworkMap['150x150'] ?? '') as String
+              : '';
+          final streamUrl = 'https://discoveryprovider.audius.co/v1/tracks/$id/stream?app_name=muscia';
+
+          songs.add(
+            Song(
+              id: 'audius_$id',
+              title: _cleanTitle(title),
+              artist: artist,
+              album: 'Audius Stream',
+              duration: Duration(seconds: durationSec),
+              artworkUrl: artwork.isNotEmpty
+                  ? artwork
+                  : 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&q=80',
+              audioUrl: streamUrl,
+            ),
+          );
+        }
+        return songs;
+      }
+    } catch (e) {
+      debugPrint('Audius search error: $e');
+    }
+    return [];
+  }
+
+  // YouTube Search Helper
+  Future<List<Song>> _searchYoutube(String query) async {
+    try {
+      final searchResults = await _yt.search.search(query).timeout(const Duration(seconds: 5));
       final List<Song> songs = [];
 
-      for (final video in searchResults.take(25)) {
-        // Filter out very long videos (over 20 mins) to prefer actual tracks
+      for (final video in searchResults.take(20)) {
         final duration = video.duration ?? Duration.zero;
-        if (duration.inMinutes > 25) continue;
+        if (duration.inMinutes > 20) continue;
 
         songs.add(
           Song(
@@ -40,9 +127,8 @@ class MusicRepository {
         );
       }
       return songs;
-    } catch (e) {
-      // Fallback search via iTunes API for instant resilience
-      return _searchItunesFallback(cleanQuery);
+    } catch (_) {
+      return [];
     }
   }
 
@@ -52,7 +138,7 @@ class MusicRepository {
       final url = Uri.parse(
         'https://itunes.apple.com/search?term=${Uri.encodeComponent(query)}&media=music&entity=song&limit=25',
       );
-      final res = await http.get(url).timeout(const Duration(seconds: 5));
+      final res = await http.get(url).timeout(const Duration(seconds: 4));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
         final results = (data['results'] as List<dynamic>?) ?? [];
@@ -86,26 +172,46 @@ class MusicRepository {
 
   // Get a list of candidate playable FULL stream URLs (Never previews)
   Future<List<String>> getStreamCandidates(Song song) async {
-    // 1. Return cached full stream URL immediately
-    if (_streamCache.containsKey(song.id)) {
-      final cached = _streamCache[song.id]!;
-      return [
-        cached,
-        'https://muscia-backend.onrender.com/api/proxy?url=${Uri.encodeComponent(cached)}'
-      ];
-    }
-
     final List<String> candidates = [];
 
-    // 2. Direct YouTube manifest if it is a valid 11-character YouTube video ID
-    if (!song.id.startsWith('itunes_') && !song.id.startsWith('starter_') && song.id.length == 11) {
+    // 1. Direct pre-attached audio stream (e.g. from Audius API)
+    if (song.audioUrl != null &&
+        song.audioUrl!.isNotEmpty &&
+        !song.audioUrl!.toLowerCase().contains('preview') &&
+        !song.audioUrl!.toLowerCase().contains('audiopreview')) {
+      candidates.add(song.audioUrl!);
+      candidates.add('https://muscia-backend.onrender.com/api/proxy?url=${Uri.encodeComponent(song.audioUrl!)}');
+    }
+
+    // 2. Direct Audius track ID stream
+    if (song.id.startsWith('audius_')) {
+      final cleanId = song.id.replaceFirst('audius_', '');
+      final audiusUrl = 'https://discoveryprovider.audius.co/v1/tracks/$cleanId/stream?app_name=muscia';
+      if (!candidates.contains(audiusUrl)) {
+        candidates.insert(0, audiusUrl);
+      }
+      return candidates;
+    }
+
+    // 3. Cached full stream URL
+    if (_streamCache.containsKey(song.id)) {
+      final cached = _streamCache[song.id]!;
+      if (!candidates.contains(cached)) {
+        candidates.add(cached);
+        candidates.add('https://muscia-backend.onrender.com/api/proxy?url=${Uri.encodeComponent(cached)}');
+      }
+      return candidates;
+    }
+
+    // 4. Direct YouTube manifest if it is a valid 11-character YouTube video ID
+    if (!song.id.startsWith('itunes_') && !song.id.startsWith('starter_') && !song.id.startsWith('audius_') && song.id.length == 11) {
       try {
-        final manifest = await _yt.videos.streamsClient.getManifest(song.id).timeout(const Duration(seconds: 12));
+        final manifest = await _yt.videos.streamsClient.getManifest(song.id).timeout(const Duration(seconds: 5));
         final streams = _extractAllAudioStreams(manifest);
         if (streams.isNotEmpty) {
           _streamCache[song.id] = streams.first;
           candidates.addAll(streams);
-          // Add Render audio proxy as bulletproof fail-safe
+          // Add Render audio proxy as fail-safe
           candidates.add('https://muscia-backend.onrender.com/api/proxy?url=${Uri.encodeComponent(streams.first)}');
           return candidates;
         }
@@ -114,16 +220,28 @@ class MusicRepository {
       }
     }
 
-    // 3. Fallback search on YouTube using Title + Artist for complete full-length song
+    // 5. Audius track search by Title + Artist (Instant high-speed fail-safe)
+    try {
+      final cleanTitle = _cleanTitle(song.title);
+      final audiusResults = await searchAudius('$cleanTitle ${song.artist}');
+      if (audiusResults.isNotEmpty && audiusResults.first.audioUrl != null) {
+        final audiusStream = audiusResults.first.audioUrl!;
+        if (!candidates.contains(audiusStream)) {
+          candidates.add(audiusStream);
+        }
+      }
+    } catch (_) {}
+
+    // 6. YouTube search for full track
     try {
       final cleanTitle = _cleanTitle(song.title);
       final query = '$cleanTitle ${song.artist} audio';
-      final searchResults = await _yt.search.search(query).timeout(const Duration(seconds: 10));
+      final searchResults = await _yt.search.search(query).timeout(const Duration(seconds: 5));
       for (final video in searchResults.take(3)) {
         final duration = video.duration ?? Duration.zero;
         if (duration.inMinutes > 20) continue;
         try {
-          final manifest = await _yt.videos.streamsClient.getManifest(video.id).timeout(const Duration(seconds: 10));
+          final manifest = await _yt.videos.streamsClient.getManifest(video.id).timeout(const Duration(seconds: 5));
           final streams = _extractAllAudioStreams(manifest);
           if (streams.isNotEmpty) {
             _streamCache[song.id] = streams.first;
@@ -137,15 +255,6 @@ class MusicRepository {
       }
     } catch (e) {
       debugPrint('Search manifest fetch failed for ${song.title}: $e');
-    }
-
-    // 4. Pre-existing audio URL only if NOT an Apple 30-second preview
-    if (song.audioUrl != null &&
-        song.audioUrl!.isNotEmpty &&
-        !song.audioUrl!.toLowerCase().contains('preview') &&
-        !song.audioUrl!.toLowerCase().contains('audiopreview')) {
-      candidates.add(song.audioUrl!);
-      candidates.add('https://muscia-backend.onrender.com/api/proxy?url=${Uri.encodeComponent(song.audioUrl!)}');
     }
 
     return candidates;
